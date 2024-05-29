@@ -27,3 +27,5 @@ Porcentaje de celdas limpias después de 500, 1000 y 1500 pasos de simulación.
 Analiza cómo la cantidad de agentes impacta el tiempo dedicado, así como la cantidad de movimientos realizados. Desarrollar un informe con lo observado.
 
 
+google colab: https://colab.research.google.com/drive/12BscAS7y8AA7SLmutWtf8196Zr18x9Tz?usp=sharing
+
