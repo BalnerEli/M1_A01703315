@@ -1,0 +1,191 @@
+pip install mesa
+# Importación de las librerías necesarias
+
+# Importamos las clases que se requieren para manejar los agentes (Agent) y su entorno (Model).
+# Cada modelo puede contener múltiples agentes.
+from mesa import Agent, Model
+
+# Con ''SimultaneousActivation, hacemos que todos los agentes se activen ''al azar''.
+from mesa.time import RandomActivation
+import random
+
+# Haremos uso de ''DataCollector'' para obtener información de cada paso de la simulación.
+from mesa.datacollection import DataCollector
+
+# Haremos uso de ''MultriGrid'' para obtener una cuadrícula
+from mesa.space import MultiGrid
+
+
+# matplotlib lo usaremos crear una animación de cada uno de los pasos del modelo.
+%matplotlib inline
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+plt.rcParams["animation.html"] = "jshtml"
+matplotlib.rcParams['animation.embed_limit'] = 2**128
+
+# Importamos los siguientes paquetes para el mejor manejo de valores numéricos.
+import numpy as np
+import pandas as pd
+
+# Se define la clase CleaningAgent, la cuál  representa un robot de limpieza
+class CleaningAgent(Agent):
+    def __init__(self, id, model):
+        super().__init__(id, model)
+        self.cleaned = 0  # Contador de celdas limpiadas por el agente
+
+    def step(self):
+        # Si la celda actual está sucia, se limpia
+        if self.model.grid_state[self.pos] == 1:
+            self.model.grid_state[self.pos] = 0
+            self.cleaned += 1
+        else:
+            # Si ya está limpia, entonces el agente se mueve a una celda vecina 
+            move = random.choice(self.model.grid.get_neighborhood(self.pos, moore=True, include_center=False))
+            self.model.grid.move_agent(self, move)
+
+
+# Se define la clase CleaningModel
+class CleaningModel(Model):
+    def __init__(self, num_agents, width, height, dirty_percentage, max_steps):
+        super(CleaningModel, self).__init__()
+        self.num_agents = num_agents
+        self.width = width
+        self.height = height
+        self.dirty_percentage = dirty_percentage
+        self.max_steps = max_steps
+        self.grid = MultiGrid(width, height, False)
+        self.schedule = RandomActivation(self)
+        self.current_step = 0
+        self.all_cleaned_step = None
+        self.grid_state = self.initialize_grid()  # Se inicaliza la cuadrícula o el cuarto en donde se limpia
+        self.initialize_agents()  # Se inicializan los agentes de forma aleatoria
+        self.datacollector = DataCollector(
+            model_reporters={"Clean Percentage": self.clean_percentage}
+        )
+
+    # Inicializa la cuadrícula con el porcentaje especificado en los parámetros de celdas sucias (80%)
+    def initialize_grid(self):
+        total_cells = self.width * self.height
+        num_dirty_cells = int(total_cells * self.dirty_percentage)
+        all_cells = [(x, y) for x in range(self.width) for y in range(self.height)]
+        dirty_cells = random.sample(all_cells, num_dirty_cells)
+        grid_state = {cell: 1 if cell in dirty_cells else 0 for cell in all_cells}
+        return grid_state
+
+    # Se inicializan los robots en forma aleatoria 
+    def initialize_agents(self):
+        for i in range(self.num_agents):
+            agent = CleaningAgent(i, self)
+            self.schedule.add(agent)
+            x, y = self.empty_cell()
+            self.grid.place_agent(agent, (x, y))
+
+    # Encuentra una celda vacía en la cuadrícula, esto sirve para saber si hay otro agente ahí o no
+    def empty_cell(self):
+    # Bucle infinito que continuará hasta encontrar una celda vacía
+      while True:
+          # Genera una coordenada (x, y) al azar dentro de los límites de la cuadrícula
+          x = random.randrange(self.width)
+          y = random.randrange(self.height)
+          # Verifica si la celda en la coordenada (x, y) está vacía
+          if self.grid.is_cell_empty((x, y)):
+              # Si la celda está vacía, devuelve las coordenadas (x, y)
+              return (x, y)
+
+
+    def step(self):
+        # Realiza un paso de la simulación
+        self.schedule.step()
+        self.datacollector.collect(self)
+        self.current_step += 1
+        # Verifica si todas las celdas están limpias
+        if self.clean_percentage() == 100.0 and self.all_cleaned_step is None:
+            self.all_cleaned_step = self.current_step
+        # Termina la simulación si se alcanzan los pasos máximos o todas las celdas están limpias
+        if self.current_step >= self.max_steps or self.clean_percentage() == 100.0:
+            self.running = False
+
+    # Calcula el porcentaje de celdas limpias
+    def clean_percentage(self):
+        clean_cells = sum(1 for cell in self.grid_state.values() if cell == 0)
+        total_cells = self.width * self.height
+        return (clean_cells / total_cells) * 100
+
+
+# Función para animar el modelo
+def animate_model(model, steps):
+    fig, ax = plt.subplots()
+    cmap = plt.get_cmap('gray', 3)
+
+    def update(frame):
+        ax.clear()
+        grid_display = np.zeros((model.grid.width, model.grid.height))
+        for (x, y), value in model.grid_state.items():
+            grid_display[y][x] = value
+        for agent in model.schedule.agents:
+            grid_display[agent.pos[1]][agent.pos[0]] = 2
+        ax.imshow(grid_display, cmap=cmap, vmin=0, vmax=2)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        model.step()
+
+    anim = animation.FuncAnimation(fig, update, frames=steps, repeat=False)
+    plt.close()
+    return anim
+# Parámetros de la simulación
+width, height = 20, 20
+dirty_percentage = 0.8
+agents = [1, 5, 10]
+max_steps = 1500
+
+# Resultados para almacenar los pasos necesarios para limpiar completamente la cuadrícula
+results = {}
+
+# Ejecución de la simulación y animación para cada cantidad de agentes definida en agents
+for num_agents in agents:
+    model = CleaningModel(num_agents, width, height, dirty_percentage, max_steps)
+    anim = animate_model(model, max_steps)
+    display(anim)
+
+    clean_percentage = model.clean_percentage()
+    steps = model.datacollector.get_model_vars_dataframe()
+    steps_500 = steps.loc[steps.index == 500, 'Clean Percentage'].values[0] if len(steps) > 500 else None
+    steps_1000 = steps.loc[steps.index == 1000, 'Clean Percentage'].values[0] if len(steps) > 1000 else None
+    steps_1500 = steps.loc[steps.index == 1500, 'Clean Percentage'].values[0] if len(steps) > 1500 else None
+
+    print(f"{num_agents} AGENTES")
+    print(f"Porcentaje de celdas limpias con 500 pasos: {steps_500}%")
+    print(f"Porcentaje de celdas limpias con 1000 pasos: {steps_1000}%")
+    print(f"Porcentaje de celdas limpias con 1500 pasos: {steps_1500}%")
+
+    if clean_percentage == 100.0:
+        print(f"El espacio quedó limpio después de {model.current_step-1} pasos con {num_agents} agentes")
+    else:
+        print(f"WARNING: El espacio no quedó completamente limpio con {model.current_step-1} pasos con {num_agents} agentes")
+
+    if model.all_cleaned_step is not None:
+        print(f"Pasos necesarios para que todas las celdas estén limpias: {model.all_cleaned_step}")
+    else:
+        print(f"No se pudo limpiar el cuarto con los pasos máximos con {num_agents} agentes")
+    print("\n")
+
+    # Almacenar los resultados para cada cantidad de agentes
+    results[num_agents] = {
+        'steps': model.current_step,
+        'clean_percentage': model.clean_percentage(),
+        'all_cleaned_step': model.all_cleaned_step
+    }
+
+# Determinación de la cantidad mínima de agentes para limpiar en menos de 1000 pasos
+min_agents = None
+for num_agents, data in results.items():
+    if data["all_cleaned_step"] is not None and data["all_cleaned_step"] <= 1000:
+        min_agents = num_agents
+        break
+
+# Mostrar resultados
+if min_agents is not None:
+    print(f'La cantidad mínima de agentes para limpiar el espacio en menos de 1000 pasos es: {min_agents}')
+else:
+    print('Ningún número de agentes logró limpiar el espacio en menos de 1000 pasos')
